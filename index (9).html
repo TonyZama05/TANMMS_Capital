@@ -165,9 +165,89 @@
   .footer-note{color:var(--dim);font-size:11px;text-align:center;padding:24px 0 4px;}
   .history-item{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #14181f;font-size:12px;}
   .history-item:last-child{border-bottom:none;}
+
+  /* ===== Tabs ===== */
+  .tabbar{
+    display:flex;gap:4px;padding:0 22px;border-bottom:1px solid var(--border);
+    background:#08090c;position:sticky;top:63px;z-index:40;overflow-x:auto;
+  }
+  .tabbar button{
+    background:transparent;border:none;border-bottom:2px solid transparent;
+    border-radius:0;padding:12px 16px;font-size:12.5px;letter-spacing:.6px;
+    text-transform:uppercase;color:var(--muted);white-space:nowrap;
+  }
+  .tabbar button:hover{color:var(--text);background:transparent;}
+  .tabbar button.active{color:var(--gold);border-bottom-color:var(--gold);}
+  .tabpage{display:none;}
+  .tabpage.active{display:block;}
+
+  /* ===== Posiciones table ===== */
+  table.pos-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  table.pos-table th{
+    text-align:right;color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.6px;padding:10px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);
+  }
+  table.pos-table th:first-child, table.pos-table th:nth-child(2){text-align:left;}
+  table.pos-table td{padding:10px 12px;border-bottom:1px solid #14181f;font-family:var(--mono);text-align:right;}
+  table.pos-table td:first-child, table.pos-table td:nth-child(2){text-align:left;font-family:var(--sans);}
+  table.pos-table tbody tr{cursor:pointer;}
+  table.pos-table tbody tr:hover{background:var(--panel-2);}
+  table.pos-table .sym{font-family:var(--mono);font-weight:700;}
+
+  /* ===== Sectores / industria ===== */
+  .industry-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #14181f;font-size:12px;}
+  .industry-row:last-child{border-bottom:none;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media (max-width:900px){.two-col{grid-template-columns:1fr;}}
+
+  /* ===== Position detail side panel ===== */
+  .side-panel-bg{
+    position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:110;
+  }
+  .side-panel-bg.show{display:block;}
+  .side-panel{
+    position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);
+    background:var(--panel);border-left:1px solid var(--border);
+    transform:translateX(100%);transition:transform .2s ease;overflow-y:auto;
+  }
+  .side-panel-bg.show .side-panel{transform:translateX(0);}
+  .sp-head{padding:20px 22px;border-bottom:1px solid var(--border);}
+  .sp-head .sp-sym{font-family:var(--mono);font-weight:700;font-size:22px;}
+  .sp-head .sp-desc{color:var(--muted);font-size:12px;margin-top:2px;}
+  .sp-head .sp-price{font-family:var(--mono);font-size:26px;margin-top:14px;}
+  .sp-body{padding:8px 22px 26px;}
+  .sp-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px;}
+  .sp-item .sp-label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;}
+  .sp-item .sp-value{font-family:var(--mono);font-size:16.5px;font-weight:600;}
+  .sp-close{position:absolute;top:16px;right:16px;}
 </style>
 </head>
 <body>
+
+<div class="side-panel-bg" id="sidePanelBg" onclick="if(event.target===this) closeSidePanel()">
+  <div class="side-panel">
+    <button class="btn-ghost sp-close" onclick="closeSidePanel()">✕</button>
+    <div class="sp-head">
+      <div class="sp-sym" id="spSym">—</div>
+      <div class="sp-desc" id="spDesc">—</div>
+      <div class="sp-price num" id="spPrice">—</div>
+      <div class="num" id="spChangeToday" style="font-size:12.5px;margin-top:2px;"></div>
+    </div>
+    <div class="sp-body">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-top:6px;">Tu posición</div>
+      <div class="sp-grid">
+        <div class="sp-item"><div class="sp-label">Acciones</div><div class="sp-value num" id="spShares">—</div></div>
+        <div class="sp-item"><div class="sp-label">Valor de mercado</div><div class="sp-value num" id="spMktValue">—</div></div>
+        <div class="sp-item"><div class="sp-label">Costo promedio</div><div class="sp-value num" id="spAvgCost">—</div></div>
+        <div class="sp-item"><div class="sp-label">Diversidad del portafolio</div><div class="sp-value num" id="spWeight">—</div></div>
+        <div class="sp-item"><div class="sp-label">Retorno de hoy</div><div class="sp-value num" id="spTodayReturn">—</div></div>
+        <div class="sp-item"><div class="sp-label">Retorno total</div><div class="sp-value num" id="spTotalReturn">—</div></div>
+        <div class="sp-item"><div class="sp-label">Dividendos recibidos</div><div class="sp-value num" id="spDividends">—</div></div>
+        <div class="sp-item"><div class="sp-label">Sector / industria</div><div class="sp-value" id="spSector" style="font-size:12.5px;">—</div></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="topbar">
   <div class="brand">
@@ -186,6 +266,13 @@
   </div>
 </div>
 
+<div class="tabbar">
+  <button class="active" data-tabpage="resumen">Resumen</button>
+  <button data-tabpage="posiciones">Posiciones</button>
+  <button data-tabpage="sectores">Sectores &amp; industrias</button>
+  <button data-tabpage="historial">Historial</button>
+</div>
+
 <div class="wrap">
 
   <div class="kpis">
@@ -197,41 +284,89 @@
     <div class="kpi"><div class="label">Dividendos (año)</div><div class="value" id="kpiDiv">—</div></div>
   </div>
 
-  <div class="grid">
-    <!-- Holdings -->
-    <div class="panel">
-      <div class="panel-head"><h3>Holdings</h3><span class="muted num" id="holdingsCount" style="font-size:11px;"></span></div>
-      <div id="holdingsList"><div class="empty">Sin holdings todavía. Carga un estado de cuenta para comenzar.</div></div>
-    </div>
+  <!-- ===== TAB: Resumen ===== -->
+  <div class="tabpage active" id="tab-resumen">
+    <div class="grid" style="grid-template-columns:340px 1fr;">
+      <!-- Holdings -->
+      <div class="panel">
+        <div class="panel-head"><h3>Holdings</h3><span class="muted num" id="holdingsCount" style="font-size:11px;"></span></div>
+        <div id="holdingsList"><div class="empty">Sin holdings todavía. Carga un estado de cuenta para comenzar.</div></div>
+      </div>
 
-    <!-- Center: charts -->
-    <div class="panel">
-      <div class="panel-head"><h3>Curva de capital</h3></div>
-      <div class="chart-tabs">
-        <button class="active" data-tab="equity">Valor</button>
-        <button data-tab="monthly">Rendimiento mensual</button>
-      </div>
-      <div class="panel-body">
-        <canvas id="equityChart" height="230"></canvas>
-        <canvas id="monthlyChart" height="230" style="display:none;"></canvas>
-      </div>
-      <div class="panel-head" style="border-top:1px solid var(--border);"><h3>Historial de estados de cuenta</h3></div>
-      <div class="panel-body" id="historyList" style="max-height:220px;overflow:auto;">
-        <div class="empty">—</div>
-      </div>
-    </div>
-
-    <!-- Right: sector + notes -->
-    <div class="panel">
-      <div class="panel-head"><h3>Asignación por sector</h3></div>
-      <div class="panel-body">
-        <canvas id="sectorChart" height="180"></canvas>
-        <div id="sectorList" style="margin-top:10px;"></div>
+      <!-- Center: charts -->
+      <div class="panel">
+        <div class="panel-head"><h3>Curva de capital</h3></div>
+        <div class="panel-body">
+          <canvas id="equityChart" height="230"></canvas>
+        </div>
+        <div class="panel-head" style="border-top:1px solid var(--border);"><h3>Asignación por sector</h3></div>
+        <div class="panel-body">
+          <canvas id="sectorChartMini" height="140"></canvas>
+          <div id="sectorListMini" style="margin-top:10px;"></div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="footer-note">TANMMS CAPITAL · datos cargados manualmente desde estados de cuenta GBM · precios en vivo vía proxy configurable</div>
+  <!-- ===== TAB: Posiciones ===== -->
+  <div class="tabpage" id="tab-posiciones">
+    <div class="panel">
+      <div class="panel-head"><h3>Posiciones detalladas</h3><span class="muted" style="font-size:11px;">clic en una fila para ver el detalle</span></div>
+      <div style="max-height:640px;overflow:auto;">
+        <table class="pos-table" id="posTable">
+          <thead>
+            <tr>
+              <th>Símbolo</th><th>Descripción</th><th>Cantidad</th><th>Costo prom.</th>
+              <th>Precio</th><th>Valor de mercado</th><th>Peso</th><th>G/L $</th><th>G/L %</th>
+            </tr>
+          </thead>
+          <tbody id="posTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TAB: Sectores & industrias ===== -->
+  <div class="tabpage" id="tab-sectores">
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head">
+        <h3>Clasificación de sectores</h3>
+        <button class="btn-ghost" id="refreshClassificationBtn" style="display:none;font-size:11.5px;">↻ Actualizar clasificación (Refinitiv)</button>
+      </div>
+      <div class="panel-body" id="classificationStatus" style="font-size:11.5px;"></div>
+    </div>
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-head"><h3>Por sector</h3></div>
+        <div class="panel-body">
+          <canvas id="sectorChart" height="220"></canvas>
+          <div id="sectorList" style="margin-top:12px;"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Por industria</h3></div>
+        <div class="panel-body" id="industryList" style="max-height:340px;overflow:auto;">
+          <div class="empty">Sin datos de industria todavía.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TAB: Historial ===== -->
+  <div class="tabpage" id="tab-historial">
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h3>Rendimiento mensual</h3></div>
+      <div class="panel-body"><canvas id="monthlyChart" height="230"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Historial de estados de cuenta</h3></div>
+      <div class="panel-body" id="historyList" style="max-height:420px;overflow:auto;">
+        <div class="empty">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">TANMMS CAPITAL · datos cargados manualmente desde estados de cuenta GBM · precios y clasificación en vivo vía proxy configurable</div>
 </div>
 
 <!-- LOGIN MODAL -->
@@ -287,6 +422,10 @@ const db = firebase.firestore();
    See /refinitiv-proxy in the project for a starting point. */
 const REFINITIV_PROXY_URL = ""; // e.g. "https://us-central1-tanmms-capital.cloudfunctions.net/refinitivPrices"
 
+/* Optional: URL of a proxy that returns { SYMBOL: { sector, industry }, ... }
+   using Refinitiv TRBC classification fields. See refinitiv-proxy/index.js. */
+const REFINITIV_CLASSIFICATION_URL = ""; // e.g. ".../refinitivClassification"
+
 /* =========================================================
    STATE
    ========================================================= */
@@ -294,7 +433,9 @@ let statements = {};      // { "2026-06": {...} }
 let sortedPeriods = [];   // ascending period keys
 let latest = null;
 let sectorMap = {};       // { SYMBOL: "Tecnología" }
+let industryMap = {};     // { SYMBOL: "Software" } — from Refinitiv classification
 let livePrices = {};      // overlay from Refinitiv proxy, optional
+let liveChangePct = {};   // { SYMBOL: dailyChangePct } — overlay from Refinitiv proxy, optional
 
 const fmt$ = n => (n<0?'-$':'$') + Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct = n => (n>=0?'+':'') + n.toFixed(2) + '%';
@@ -320,6 +461,7 @@ auth.onAuthStateChanged(user => {
   document.getElementById('uploadBtn').style.display = editing ? 'inline-block' : 'none';
   document.getElementById('logoutBtn').style.display = editing ? 'inline-block' : 'none';
   document.getElementById('loginBtn').style.display = editing ? 'none' : 'inline-block';
+  document.getElementById('refreshClassificationBtn').style.display = editing ? 'inline-block' : 'none';
   const pill = document.getElementById('authPill');
   pill.textContent = editing ? 'modo edición' : 'solo lectura';
   pill.className = 'pill' + (editing ? ' edit' : '');
@@ -337,7 +479,10 @@ db.collection('statements').orderBy('periodKey').onSnapshot(snap => {
 });
 
 db.collection('config').doc('meta').onSnapshot(doc => {
-  if(doc.exists){ sectorMap = doc.data().sectorMap || {}; }
+  if(doc.exists){
+    sectorMap = doc.data().sectorMap || {};
+    industryMap = doc.data().industryMap || {};
+  }
   render();
 });
 
@@ -378,11 +523,20 @@ function render(){
   document.getElementById('kpiDiv').textContent = fmt$(divYtd);
 
   renderHoldings(holdings, totalMV);
+  renderPositions(holdings, totalMV);
   renderEquityChart();
   renderMonthlyChart();
   renderSectors(holdings, totalMV);
   renderHistory();
+
+  currentHoldings = holdings;
+  currentTotalMV = totalMV;
+  // keep the open side panel in sync if a position is being viewed
+  if(openSymbol) openPositionPanel(openSymbol);
 }
+let currentHoldings = [];
+let currentTotalMV = 0;
+let openSymbol = null;
 
 function renderHoldings(holdings, totalMV){
   const list = document.getElementById('holdingsList');
@@ -392,7 +546,7 @@ function renderHoldings(holdings, totalMV){
     const price = livePrices[h.symbol] || h.marketPrice;
     const weight = totalMV ? (h.marketValue/totalMV*100) : 0;
     const gPct = h.totalCost ? (h.gainLoss/h.totalCost*100) : 0;
-    return `<div class="holding-row" title="${h.description}">
+    return `<div class="holding-row" title="${h.description}" onclick="openPositionPanel('${h.symbol}')">
       <div class="h-left">
         <div class="h-sym">${h.symbol}</div>
         <div class="h-desc">${h.description}</div>
@@ -404,6 +558,26 @@ function renderHoldings(holdings, totalMV){
         <div class="muted" style="font-size:10px;">${weight.toFixed(1)}%</div>
       </div>
     </div>`;
+  }).join('');
+}
+
+function renderPositions(holdings, totalMV){
+  const body = document.getElementById('posTableBody');
+  if(!holdings.length){ body.innerHTML = '<tr><td colspan="9" class="empty">Sin holdings todavía.</td></tr>'; return; }
+  body.innerHTML = holdings.map(h=>{
+    const weight = totalMV ? (h.marketValue/totalMV*100) : 0;
+    const gPct = h.totalCost ? (h.gainLoss/h.totalCost*100) : 0;
+    return `<tr onclick="openPositionPanel('${h.symbol}')">
+      <td class="sym">${h.symbol}</td>
+      <td>${h.description}</td>
+      <td>${h.quantity}</td>
+      <td>${fmt$(h.unitCost)}</td>
+      <td>${fmt$(livePrices[h.symbol] || h.marketPrice)}</td>
+      <td>${fmt$(h.marketValue)}</td>
+      <td>${weight.toFixed(1)}%</td>
+      <td class="${cls(h.gainLoss)}">${fmt$(h.gainLoss)}</td>
+      <td class="${cls(gPct)}">${fmtPct(gPct)}</td>
+    </tr>`;
   }).join('');
 }
 
@@ -447,17 +621,18 @@ function renderMonthlyChart(){
   });
 }
 
-document.querySelectorAll('.chart-tabs button').forEach(btn=>{
+/* ===== Top-level tab switching ===== */
+document.querySelectorAll('.tabbar button').forEach(btn=>{
   btn.onclick = () => {
-    document.querySelectorAll('.chart-tabs button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tabbar button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tabpage').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
-    const tab = btn.dataset.tab;
-    document.getElementById('equityChart').style.display = tab==='equity' ? 'block':'none';
-    document.getElementById('monthlyChart').style.display = tab==='monthly' ? 'block':'none';
+    document.getElementById('tab-' + btn.dataset.tabpage).classList.add('active');
   };
 });
 
 const palette = ['#d4a94e','#17c964','#5aa9ff','#ff5d5d','#b98cf0','#f0a35a','#5ad1c9','#8a94a6'];
+let sectorChartMiniInst;
 function renderSectors(holdings, totalMV){
   const bySector = {};
   holdings.forEach(h=>{
@@ -466,17 +641,40 @@ function renderSectors(holdings, totalMV){
   });
   const labels = Object.keys(bySector);
   const data = labels.map(l=>bySector[l]);
-  const ctx = document.getElementById('sectorChart');
-  if(sectorChartInst) sectorChartInst.destroy();
-  sectorChartInst = new Chart(ctx, {
-    type:'doughnut',
-    data:{ labels, datasets:[{ data, backgroundColor: labels.map((_,i)=>palette[i%palette.length]), borderWidth:0 }]},
-    options:{ plugins:{legend:{display:false}}, cutout:'68%' }
+
+  const drawDonut = (canvasId, listId, instRef) => {
+    const ctx = document.getElementById(canvasId);
+    if(!ctx) return null;
+    if(instRef) instRef.destroy();
+    const inst = new Chart(ctx, {
+      type:'doughnut',
+      data:{ labels, datasets:[{ data, backgroundColor: labels.map((_,i)=>palette[i%palette.length]), borderWidth:0 }]},
+      options:{ plugins:{legend:{display:false}}, cutout:'68%' }
+    });
+    document.getElementById(listId).innerHTML = labels.map((l,i)=>{
+      const pct = totalMV ? (data[i]/totalMV*100) : 0;
+      return `<div class="sector-row"><span><span class="sector-dot" style="background:${palette[i%palette.length]}"></span>${l}</span><span class="num">${pct.toFixed(1)}%</span></div>`;
+    }).join('');
+    return inst;
+  };
+
+  sectorChartInst = drawDonut('sectorChart', 'sectorList', sectorChartInst);
+  sectorChartMiniInst = drawDonut('sectorChartMini', 'sectorListMini', sectorChartMiniInst);
+
+  // Industry breakdown (from Refinitiv classification, if loaded)
+  const byIndustry = {};
+  holdings.forEach(h=>{
+    const ind = industryMap[h.symbol] || 'Sin clasificar';
+    byIndustry[ind] = (byIndustry[ind]||0) + h.marketValue;
   });
-  document.getElementById('sectorList').innerHTML = labels.map((l,i)=>{
-    const pct = totalMV ? (data[i]/totalMV*100) : 0;
-    return `<div class="sector-row"><span><span class="sector-dot" style="background:${palette[i%palette.length]}"></span>${l}</span><span class="num">${pct.toFixed(1)}%</span></div>`;
-  }).join('');
+  const indLabels = Object.keys(byIndustry).sort((a,b)=>byIndustry[b]-byIndustry[a]);
+  const indEl = document.getElementById('industryList');
+  if(indEl){
+    indEl.innerHTML = indLabels.length ? indLabels.map(l=>{
+      const pct = totalMV ? (byIndustry[l]/totalMV*100) : 0;
+      return `<div class="industry-row"><span>${l}</span><span class="num">${fmt$(byIndustry[l])} <span class="muted">(${pct.toFixed(1)}%)</span></span></div>`;
+    }).join('') : '<div class="empty">Sin datos de industria todavía.</div>';
+  }
 }
 
 function renderHistory(){
@@ -584,9 +782,20 @@ function parseStatement(fullText, lines){
   const cashMatch = fullText.match(/Cash & Cash Equivalents\s+\$?([\d,\.]+)\s+\$?([\d,\.]+)/);
   cash = cashMatch ? num(cashMatch[2]) : cashFromMoneyMarket;
 
+  // dividends per symbol this period: net of DIV (gross) and DIVNRA (withholding, negative)
+  const divRe = /^(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+USD\s+(DIV|DIVNRA)\s+([A-Z]+)\s+-\s+.+?\s+(-?[\d.]+)\s+([\d.]+)\s+(\(?-?[\d.]+\)?)$/;
+  const dividendsBySymbol = {};
+  lines.forEach(line=>{
+    const m = line.match(divRe);
+    if(!m) return;
+    const symbol = m[3];
+    const amount = num(m[6]);
+    dividendsBySymbol[symbol] = (dividendsBySymbol[symbol] || 0) + amount;
+  });
+
   const periodKey = periodEnd ? toPeriodKey(periodEnd) : '';
 
-  return { periodStart, periodEnd, periodKey, beginningValue, endingValue, deposits, withdrawals, dividendInterest, cash, holdings };
+  return { periodStart, periodEnd, periodKey, beginningValue, endingValue, deposits, withdrawals, dividendInterest, cash, holdings, dividendsBySymbol };
 }
 
 function toPeriodKey(dateStr){
@@ -628,12 +837,97 @@ async function refreshLivePrices(){
   const symbols = (latest.holdings||[]).map(h=>h.symbol).join(',');
   try{
     const res = await fetch(`${REFINITIV_PROXY_URL}?symbols=${symbols}`);
-    livePrices = await res.json();
+    const data = await res.json();
+    // accepts either { SYM: price } or { SYM: { price, changePct } }
+    livePrices = {}; liveChangePct = {};
+    Object.keys(data).forEach(sym=>{
+      const v = data[sym];
+      if(v && typeof v === 'object'){ livePrices[sym] = v.price; liveChangePct[sym] = v.changePct; }
+      else { livePrices[sym] = v; }
+    });
     render();
   }catch(e){ console.warn('No se pudieron actualizar precios en vivo:', e); }
 }
 setInterval(refreshLivePrices, 60000);
 refreshLivePrices();
+
+/* =========================================================
+   OPTIONAL: sector/industry classification via Refinitiv proxy
+   ========================================================= */
+document.getElementById('refreshClassificationBtn').onclick = refreshClassification;
+
+async function refreshClassification(){
+  const status = document.getElementById('classificationStatus');
+  if(!REFINITIV_CLASSIFICATION_URL){
+    status.textContent = 'Configura REFINITIV_CLASSIFICATION_URL en el código para activar esto (ver refinitiv-proxy/index.js).';
+    return;
+  }
+  if(!latest || !latest.holdings.length){ status.textContent = 'Sin holdings todavía.'; return; }
+  status.textContent = 'Consultando clasificación en Refinitiv…';
+  try{
+    const symbols = latest.holdings.map(h=>h.symbol).join(',');
+    const res = await fetch(`${REFINITIV_CLASSIFICATION_URL}?symbols=${symbols}`);
+    const data = await res.json(); // { SYM: { sector, industry } }
+    const newSectorMap = {...sectorMap};
+    const newIndustryMap = {...industryMap};
+    Object.keys(data).forEach(sym=>{
+      if(data[sym].sector) newSectorMap[sym] = data[sym].sector;
+      if(data[sym].industry) newIndustryMap[sym] = data[sym].industry;
+    });
+    await db.collection('config').doc('meta').set({sectorMap:newSectorMap, industryMap:newIndustryMap}, {merge:true});
+    status.textContent = `Clasificación actualizada para ${Object.keys(data).length} símbolos.`;
+  }catch(e){
+    console.error(e);
+    status.textContent = 'No se pudo consultar la clasificación — revisa la URL del proxy.';
+  }
+}
+
+/* =========================================================
+   POSITION DETAIL SIDE PANEL
+   ========================================================= */
+function openPositionPanel(symbol){
+  const h = currentHoldings.find(x=>x.symbol===symbol);
+  if(!h) return;
+  openSymbol = symbol;
+
+  const price = livePrices[symbol] || h.marketPrice;
+  const weight = currentTotalMV ? (h.marketValue/currentTotalMV*100) : 0;
+  const totalReturnPct = h.totalCost ? (h.gainLoss/h.totalCost*100) : 0;
+  const changePct = liveChangePct[symbol];
+  const todayReturn$ = (changePct!=null) ? h.marketValue * (changePct/100) : null;
+
+  // dividends received for this symbol, summed across every saved statement
+  const divTotal = sortedPeriods.reduce((sum,p)=>{
+    const s = statements[p];
+    return sum + ((s.dividendsBySymbol && s.dividendsBySymbol[symbol]) || 0);
+  }, 0);
+
+  document.getElementById('spSym').textContent = symbol;
+  document.getElementById('spDesc').textContent = h.description;
+  document.getElementById('spPrice').textContent = fmt$(price);
+  const chEl = document.getElementById('spChangeToday');
+  chEl.textContent = changePct!=null ? `${fmtPct(changePct)} hoy` : 'Retorno de hoy no disponible (conecta el proxy de precios)';
+  chEl.className = 'num ' + (changePct!=null ? cls(changePct) : 'muted');
+
+  document.getElementById('spShares').textContent = h.quantity;
+  document.getElementById('spMktValue').textContent = fmt$(h.marketValue);
+  document.getElementById('spAvgCost').textContent = fmt$(h.unitCost);
+  document.getElementById('spWeight').textContent = weight.toFixed(2) + '%';
+  const tEl = document.getElementById('spTodayReturn');
+  tEl.textContent = todayReturn$!=null ? fmt$(todayReturn$) : '—';
+  tEl.className = 'sp-value num ' + (todayReturn$!=null ? cls(todayReturn$) : '');
+  const rEl = document.getElementById('spTotalReturn');
+  rEl.innerHTML = `${fmt$(h.gainLoss)} <span class="muted" style="font-size:12px;">(${fmtPct(totalReturnPct)})</span>`;
+  rEl.className = 'sp-value num ' + cls(h.gainLoss);
+  document.getElementById('spDividends').textContent = fmt$(divTotal);
+  document.getElementById('spSector').textContent = `${sectorMap[symbol] || 'Sin clasificar'} · ${industryMap[symbol] || 'Sin clasificar'}`;
+
+  document.getElementById('sidePanelBg').classList.add('show');
+}
+function closeSidePanel(){
+  document.getElementById('sidePanelBg').classList.remove('show');
+  openSymbol = null;
+}
 </script>
 </body>
 </html>
