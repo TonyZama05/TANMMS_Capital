@@ -151,10 +151,16 @@
     color:var(--muted);font-size:13px;cursor:pointer;
   }
   .drop:hover{border-color:var(--gold);color:var(--text);}
-  input[type=text], input[type=password], input[type=email], input[type=number]{
+  input[type=text], input[type=password], input[type=email], input[type=number], input[type=search]{
     width:100%;padding:9px 11px;background:var(--panel-2);border:1px solid var(--border);
     border-radius:6px;color:var(--text);font-family:var(--sans);font-size:13px;
   }
+  .type-badge{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:.4px;}
+  .type-badge.BUY{background:rgba(23,201,100,.12);color:var(--up);}
+  .type-badge.SELL{background:rgba(255,93,93,.12);color:var(--down);}
+  .type-badge.SSO{background:rgba(212,169,78,.12);color:var(--gold);}
+  .sector-edit-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #14181f;font-size:12.5px;}
+  .sector-edit-row select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;font-family:var(--sans);}
   label.field{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px;}
   .field-group{margin-bottom:14px;}
   table.preview{width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;}
@@ -269,6 +275,7 @@
 <div class="tabbar">
   <button class="active" data-tabpage="resumen">Resumen</button>
   <button data-tabpage="posiciones">Posiciones</button>
+  <button data-tabpage="transacciones">Transacciones</button>
   <button data-tabpage="sectores">Sectores &amp; industrias</button>
   <button data-tabpage="historial">Historial</button>
 </div>
@@ -326,14 +333,39 @@
     </div>
   </div>
 
+  <!-- ===== TAB: Transacciones ===== -->
+  <div class="tabpage" id="tab-transacciones">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Historial de compras y ventas</h3>
+        <input type="text" id="tradeFilter" placeholder="Filtrar por símbolo…" style="width:180px;font-size:12px;padding:6px 10px;">
+      </div>
+      <div style="max-height:640px;overflow:auto;">
+        <table class="pos-table" id="tradesTable">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Tipo</th><th>Símbolo</th><th>Descripción</th>
+              <th>Cantidad</th><th>Precio</th><th>Monto</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== TAB: Sectores & industrias ===== -->
   <div class="tabpage" id="tab-sectores">
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head">
         <h3>Clasificación de sectores</h3>
-        <button class="btn-ghost" id="refreshClassificationBtn" style="display:none;font-size:11.5px;">↻ Actualizar clasificación (Refinitiv)</button>
+        <button class="btn-ghost" id="refreshClassificationBtn" style="display:none;font-size:11.5px;">↻ Actualizar clasificación automática</button>
       </div>
       <div class="panel-body" id="classificationStatus" style="font-size:11.5px;"></div>
+    </div>
+    <div class="panel" id="manualSectorPanel" style="display:none;margin-bottom:16px;">
+      <div class="panel-head"><h3>Asignar sector / industria manualmente</h3></div>
+      <div class="panel-body" id="manualSectorList"></div>
     </div>
     <div class="two-col">
       <div class="panel">
@@ -462,6 +494,7 @@ auth.onAuthStateChanged(user => {
   document.getElementById('logoutBtn').style.display = editing ? 'inline-block' : 'none';
   document.getElementById('loginBtn').style.display = editing ? 'none' : 'inline-block';
   document.getElementById('refreshClassificationBtn').style.display = editing ? 'inline-block' : 'none';
+  document.getElementById('manualSectorPanel').style.display = editing ? 'block' : 'none';
   const pill = document.getElementById('authPill');
   pill.textContent = editing ? 'modo edición' : 'solo lectura';
   pill.className = 'pill' + (editing ? ' edit' : '');
@@ -524,9 +557,11 @@ function render(){
 
   renderHoldings(holdings, totalMV);
   renderPositions(holdings, totalMV);
+  renderTrades();
   renderEquityChart();
   renderMonthlyChart();
   renderSectors(holdings, totalMV);
+  renderManualSectorForm(holdings);
   renderHistory();
 
   currentHoldings = holdings;
@@ -554,7 +589,7 @@ function renderHoldings(holdings, totalMV){
       </div>
       <div class="h-right">
         <div class="h-val num">${fmt$(h.marketValue)}</div>
-        <div class="h-chg num ${cls(gPct)}">${fmtPct(gPct)}</div>
+        <div class="h-chg num ${cls(gPct)}">${fmtPct(gPct)} <span class="muted" style="font-size:10px;">(${fmt$(h.gainLoss)})</span></div>
         <div class="muted" style="font-size:10px;">${weight.toFixed(1)}%</div>
       </div>
     </div>`;
@@ -580,6 +615,37 @@ function renderPositions(holdings, totalMV){
     </tr>`;
   }).join('');
 }
+
+// all trades across every saved statement, newest first
+function allTrades(){
+  return sortedPeriods.slice().reverse().flatMap(p => (statements[p].trades || []));
+}
+
+function renderTrades(){
+  const body = document.getElementById('tradesTableBody');
+  const filterVal = (document.getElementById('tradeFilter').value || '').trim().toUpperCase();
+  let trades = allTrades();
+  if(filterVal) trades = trades.filter(t => t.symbol.includes(filterVal));
+  // sort by trade date descending (dates are MM/DD/YYYY strings)
+  trades = trades.slice().sort((a,b)=>{
+    const da = a.tradeDate.split('/'), db = b.tradeDate.split('/');
+    const ta = new Date(`${da[2]}-${da[0]}-${da[1]}`);
+    const tb = new Date(`${db[2]}-${db[0]}-${db[1]}`);
+    return tb - ta;
+  });
+  if(!trades.length){ body.innerHTML = '<tr><td colspan="7" class="empty">Sin transacciones todavía — se detectan automáticamente al cargar cada estado de cuenta.</td></tr>'; return; }
+  body.innerHTML = trades.map(t=>`
+    <tr>
+      <td>${t.tradeDate}</td>
+      <td><span class="type-badge ${t.type}">${t.type}</span></td>
+      <td class="sym">${t.symbol}</td>
+      <td>${t.description}</td>
+      <td>${t.quantity}</td>
+      <td>${fmt$(t.price)}</td>
+      <td class="${cls(t.amount)}">${fmt$(t.amount)}</td>
+    </tr>`).join('');
+}
+document.getElementById('tradeFilter').addEventListener('input', renderTrades);
 
 let equityChartInst, monthlyChartInst, sectorChartInst;
 
@@ -685,6 +751,33 @@ function renderHistory(){
     const chg = s.endingValue - s.beginningValue;
     return `<div class="history-item"><span>${s.periodStart} – ${s.periodEnd}</span><span class="num ${cls(chg)}">${fmt$(s.endingValue)}</span></div>`;
   }).join('');
+}
+
+const SECTOR_SUGGESTIONS = ['Tecnología','Financiero','Salud','Consumo discrecional','Consumo básico','Energía','Industrial','Materiales','Inmobiliario','Servicios de comunicación','Servicios públicos','ETF','Cripto','Otros'];
+
+function renderManualSectorForm(holdings){
+  const el = document.getElementById('manualSectorList');
+  if(!el) return;
+  if(!holdings.length){ el.innerHTML = '<div class="empty">Sin holdings todavía.</div>'; return; }
+  if(!el.dataset.hasDatalist){
+    el.insertAdjacentHTML('beforebegin', `<datalist id="sectorSuggestions">${SECTOR_SUGGESTIONS.map(s=>`<option value="${s}">`).join('')}</datalist>`);
+    el.dataset.hasDatalist = '1';
+  }
+  el.innerHTML = holdings.map(h=>`
+    <div class="sector-edit-row">
+      <span class="sym" style="font-family:var(--mono);font-weight:700;width:70px;">${h.symbol}</span>
+      <input list="sectorSuggestions" placeholder="Sector" value="${sectorMap[h.symbol] || ''}"
+        style="flex:1;" onchange="saveManualClassification('${h.symbol}', 'sector', this.value)">
+      <input placeholder="Industria" value="${industryMap[h.symbol] || ''}"
+        style="flex:1;" onchange="saveManualClassification('${h.symbol}', 'industry', this.value)">
+    </div>`).join('');
+}
+
+async function saveManualClassification(symbol, field, value){
+  const key = field === 'sector' ? 'sectorMap' : 'industryMap';
+  const current = field === 'sector' ? sectorMap : industryMap;
+  const updated = { ...current, [symbol]: value };
+  await db.collection('config').doc('meta').set({ [key]: updated }, { merge: true });
 }
 
 /* =========================================================
@@ -793,9 +886,30 @@ function parseStatement(fullText, lines){
     dividendsBySymbol[symbol] = (dividendsBySymbol[symbol] || 0) + amount;
   });
 
+  // full transaction log: BUY / SELL / SSO (corporate actions) rows from ACTIVITY
+  const activityRe = /^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+([A-Z]{3})\s+([A-Z]+)\s+(.+?)\s+(-?[\d.]+)\s+([\d.]+)\s+(\(?-?[\d.]+\)?)$/;
+  const trades = [];
+  lines.forEach(line=>{
+    const m = line.match(activityRe);
+    if(!m) return;
+    const type = m[4];
+    if(!['BUY','SELL','SSO'].includes(type)) return;
+    const symbol = m[5].split(' ')[0];
+    trades.push({
+      tradeDate: m[1],
+      settleDate: m[2],
+      type,
+      symbol,
+      description: m[5].replace(/^\S+\s*-\s*/, '').trim(),
+      quantity: num(m[6]),
+      price: num(m[7]),
+      amount: num(m[8])
+    });
+  });
+
   const periodKey = periodEnd ? toPeriodKey(periodEnd) : '';
 
-  return { periodStart, periodEnd, periodKey, beginningValue, endingValue, deposits, withdrawals, dividendInterest, cash, holdings, dividendsBySymbol };
+  return { periodStart, periodEnd, periodKey, beginningValue, endingValue, deposits, withdrawals, dividendInterest, cash, holdings, dividendsBySymbol, trades };
 }
 
 function toPeriodKey(dateStr){
@@ -830,14 +944,58 @@ document.getElementById('saveStatementBtn').onclick = async () => {
 };
 
 /* =========================================================
-   OPTIONAL: live price refresh via Refinitiv proxy
+   PRICES & CLASSIFICATION — Refinitiv proxy si está configurado,
+   si no, Yahoo Finance directo (sin servidor propio, sin licencia).
+   Yahoo no es data con licencia: puede venir con ~15 min de retraso y
+   depende de un endpoint no oficial detrás de un proxy CORS público —
+   suficiente para un tracker interno, no para uso institucional.
    ========================================================= */
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+async function fetchYahooPrices(symbols){
+  const out = {};
+  await Promise.all(symbols.map(async sym=>{
+    try{
+      const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
+      const res = await fetch(CORS_PROXY + encodeURIComponent(yUrl));
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+      if(meta && meta.regularMarketPrice != null){
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.previousClose ?? meta.chartPreviousClose;
+        const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : null;
+        out[sym] = { price, changePct };
+      }
+    }catch(e){ /* símbolo no disponible en Yahoo, se omite */ }
+  }));
+  return out;
+}
+
+async function fetchYahooClassification(symbols){
+  const out = {};
+  await Promise.all(symbols.map(async sym=>{
+    try{
+      const yUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(sym)}?modules=assetProfile`;
+      const res = await fetch(CORS_PROXY + encodeURIComponent(yUrl));
+      const json = await res.json();
+      const profile = json?.quoteSummary?.result?.[0]?.assetProfile;
+      if(profile) out[sym] = { sector: profile.sector || null, industry: profile.industry || null };
+    }catch(e){ /* símbolo no disponible en Yahoo, se omite */ }
+  }));
+  return out;
+}
+
 async function refreshLivePrices(){
-  if(!REFINITIV_PROXY_URL || !latest) return;
-  const symbols = (latest.holdings||[]).map(h=>h.symbol).join(',');
+  if(!latest || !(latest.holdings||[]).length) return;
+  const symbols = latest.holdings.map(h=>h.symbol);
   try{
-    const res = await fetch(`${REFINITIV_PROXY_URL}?symbols=${symbols}`);
-    const data = await res.json();
+    let data;
+    if(REFINITIV_PROXY_URL){
+      const res = await fetch(`${REFINITIV_PROXY_URL}?symbols=${symbols.join(',')}`);
+      data = await res.json();
+    } else {
+      data = await fetchYahooPrices(symbols);
+    }
     // accepts either { SYM: price } or { SYM: { price, changePct } }
     livePrices = {}; liveChangePct = {};
     Object.keys(data).forEach(sym=>{
@@ -845,40 +1003,40 @@ async function refreshLivePrices(){
       if(v && typeof v === 'object'){ livePrices[sym] = v.price; liveChangePct[sym] = v.changePct; }
       else { livePrices[sym] = v; }
     });
+    document.getElementById('livePill').textContent = REFINITIV_PROXY_URL ? '● en vivo (Refinitiv)' : '● en vivo (Yahoo)';
     render();
   }catch(e){ console.warn('No se pudieron actualizar precios en vivo:', e); }
 }
 setInterval(refreshLivePrices, 60000);
 refreshLivePrices();
 
-/* =========================================================
-   OPTIONAL: sector/industry classification via Refinitiv proxy
-   ========================================================= */
 document.getElementById('refreshClassificationBtn').onclick = refreshClassification;
 
 async function refreshClassification(){
   const status = document.getElementById('classificationStatus');
-  if(!REFINITIV_CLASSIFICATION_URL){
-    status.textContent = 'Configura REFINITIV_CLASSIFICATION_URL en el código para activar esto (ver refinitiv-proxy/index.js).';
-    return;
-  }
   if(!latest || !latest.holdings.length){ status.textContent = 'Sin holdings todavía.'; return; }
-  status.textContent = 'Consultando clasificación en Refinitiv…';
+  status.textContent = 'Consultando clasificación…';
   try{
-    const symbols = latest.holdings.map(h=>h.symbol).join(',');
-    const res = await fetch(`${REFINITIV_CLASSIFICATION_URL}?symbols=${symbols}`);
-    const data = await res.json(); // { SYM: { sector, industry } }
+    const symbols = latest.holdings.map(h=>h.symbol);
+    let data;
+    if(REFINITIV_CLASSIFICATION_URL){
+      const res = await fetch(`${REFINITIV_CLASSIFICATION_URL}?symbols=${symbols.join(',')}`);
+      data = await res.json();
+    } else {
+      data = await fetchYahooClassification(symbols);
+    }
     const newSectorMap = {...sectorMap};
     const newIndustryMap = {...industryMap};
     Object.keys(data).forEach(sym=>{
-      if(data[sym].sector) newSectorMap[sym] = data[sym].sector;
-      if(data[sym].industry) newIndustryMap[sym] = data[sym].industry;
+      // no pisa lo que ya asignaste manualmente
+      if(data[sym].sector && !sectorMap[sym]) newSectorMap[sym] = data[sym].sector;
+      if(data[sym].industry && !industryMap[sym]) newIndustryMap[sym] = data[sym].industry;
     });
     await db.collection('config').doc('meta').set({sectorMap:newSectorMap, industryMap:newIndustryMap}, {merge:true});
     status.textContent = `Clasificación actualizada para ${Object.keys(data).length} símbolos.`;
   }catch(e){
     console.error(e);
-    status.textContent = 'No se pudo consultar la clasificación — revisa la URL del proxy.';
+    status.textContent = 'No se pudo consultar la clasificación automática.';
   }
 }
 
