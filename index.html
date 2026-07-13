@@ -895,6 +895,9 @@ function parseStatement(fullText, lines){
     const type = m[4];
     if(!['BUY','SELL','SSO'].includes(type)) return;
     const symbol = m[5].split(' ')[0];
+    // cash-sweep movements (deposits/withdrawals settling into the money-market
+    // sweep) aren't real trades — exclude them from the transaction log
+    if(symbol === 'DWBDS' || /Bank Sweep|Sweep Program/i.test(m[5])) return;
     trades.push({
       tradeDate: m[1],
       settleDate: m[2],
