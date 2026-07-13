@@ -83,7 +83,7 @@
   /* ===== Layout ===== */
   .wrap{max-width:1440px;margin:0 auto;padding:20px 22px 60px;}
   .kpis{
-    display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:18px;
+    display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-bottom:18px;
   }
   .kpi{
     background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
@@ -268,6 +268,7 @@
     <span class="pill" id="authPill">solo lectura</span>
     <button class="btn-ghost" id="loginBtn">Iniciar sesión</button>
     <button class="btn-gold" id="uploadBtn" style="display:none;">+ Cargar estado de cuenta</button>
+    <button class="btn-ghost" id="resetBtn" style="display:none;color:var(--down);border-color:rgba(255,93,93,.35);">🗑 Reiniciar tracker</button>
     <button class="btn-ghost" id="logoutBtn" style="display:none;">Salir</button>
   </div>
 </div>
@@ -284,7 +285,8 @@
 
   <div class="kpis">
     <div class="kpi"><div class="label">Valor del portafolio</div><div class="value" id="kpiValue">—</div></div>
-    <div class="kpi"><div class="label">P&L total</div><div class="value" id="kpiPnl">—</div></div>
+    <div class="kpi"><div class="label">Open PNL (no realizado)</div><div class="value" id="kpiPnl">—</div></div>
+    <div class="kpi"><div class="label">Closed PNL (realizado)</div><div class="value" id="kpiClosedPnl">—</div></div>
     <div class="kpi"><div class="label">P&L del mes</div><div class="value" id="kpiMonth">—</div></div>
     <div class="kpi"><div class="label">Posiciones</div><div class="value" id="kpiPositions">—</div></div>
     <div class="kpi"><div class="label">Efectivo</div><div class="value" id="kpiCash">—</div></div>
@@ -414,6 +416,26 @@
   </div>
 </div>
 
+<!-- RESET MODAL -->
+<div class="modal-bg" id="resetModal">
+  <div class="modal" style="width:420px;">
+    <div class="modal-head"><h2 class="down">Reiniciar tracker</h2><button class="btn-ghost" onclick="closeModal('resetModal')">✕</button></div>
+    <div class="modal-body">
+      <p style="font-size:13px;line-height:1.5;">Esto borra <strong>permanentemente</strong> todos los estados de cuenta cargados,
+      la clasificación de sectores/industrias y los precios en vivo guardados. No se puede deshacer.</p>
+      <div class="field-group" style="margin-top:16px;">
+        <label class="field">Escribe REINICIAR para confirmar</label>
+        <input type="text" id="resetConfirmInput" placeholder="REINICIAR">
+      </div>
+      <div class="row-actions">
+        <button class="btn-ghost" onclick="closeModal('resetModal')">Cancelar</button>
+        <button id="confirmResetBtn" style="background:var(--down);color:#fff;border-color:var(--down);">Borrar todo permanentemente</button>
+      </div>
+      <div id="resetStatus" class="down" style="font-size:12px;margin-top:10px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- UPLOAD MODAL -->
 <div class="modal-bg" id="uploadModal">
   <div class="modal">
@@ -491,6 +513,7 @@ document.getElementById('logoutBtn').onclick = () => auth.signOut();
 auth.onAuthStateChanged(user => {
   const editing = !!user;
   document.getElementById('uploadBtn').style.display = editing ? 'inline-block' : 'none';
+  document.getElementById('resetBtn').style.display = editing ? 'inline-block' : 'none';
   document.getElementById('logoutBtn').style.display = editing ? 'inline-block' : 'none';
   document.getElementById('loginBtn').style.display = editing ? 'none' : 'inline-block';
   document.getElementById('refreshClassificationBtn').style.display = editing ? 'inline-block' : 'none';
@@ -536,6 +559,7 @@ function render(){
 
   document.getElementById('kpiValue').textContent = fmt$(totalMV);
   document.getElementById('kpiPnl').innerHTML = `<span class="${cls(pnlTotal)}">${fmt$(pnlTotal)}</span>`;
+  document.getElementById('kpiClosedPnl').innerHTML = `<span class="${cls(computeClosedPnl())}">${fmt$(computeClosedPnl())}</span>`;
   document.getElementById('kpiPositions').textContent = holdings.length;
   document.getElementById('kpiCash').textContent = fmt$(latest.cash||0);
 
@@ -619,6 +643,40 @@ function renderPositions(holdings, totalMV){
 // all trades across every saved statement, newest first
 function allTrades(){
   return sortedPeriods.slice().reverse().flatMap(p => (statements[p].trades || []));
+}
+
+// Realized P&L (Closed PNL) using a running weighted-average cost per symbol,
+// walked chronologically across every BUY/SELL ever loaded. SSO rows (corporate
+// actions / symbol reclassifications) shift quantity & cost basis but don't
+// realize a gain — their amount is $0.00 on the statement anyway.
+function computeClosedPnl(){
+  const trades = allTrades().slice().sort((a,b)=>{
+    const da = a.tradeDate.split('/'), db = b.tradeDate.split('/');
+    const ta = new Date(`${da[2]}-${da[0]}-${da[1]}`);
+    const tb = new Date(`${db[2]}-${db[0]}-${db[1]}`);
+    return ta - tb; // ascending, oldest first
+  });
+  const bySymbol = {};
+  let totalRealized = 0;
+  trades.forEach(t=>{
+    const st = bySymbol[t.symbol] || (bySymbol[t.symbol] = { qty: 0, costBasis: 0 });
+    const qty = t.quantity;
+    if(qty > 0){
+      const cost = t.amount < 0 ? -t.amount : t.price * qty;
+      st.qty += qty;
+      st.costBasis += cost;
+    } else if(qty < 0){
+      const soldQty = Math.abs(qty);
+      const avgUnitCost = st.qty > 0 ? st.costBasis / st.qty : 0;
+      const costOfSold = avgUnitCost * soldQty;
+      const proceeds = t.amount > 0 ? t.amount : t.price * soldQty;
+      if(t.type !== 'SSO') totalRealized += (proceeds - costOfSold);
+      st.qty -= soldQty;
+      st.costBasis -= costOfSold;
+      if(st.qty < 1e-6){ st.qty = 0; st.costBasis = 0; }
+    }
+  });
+  return totalRealized;
 }
 
 function renderTrades(){
@@ -783,6 +841,29 @@ async function saveManualClassification(symbol, field, value){
 /* =========================================================
    PDF UPLOAD + PARSE
    ========================================================= */
+document.getElementById('resetBtn').onclick = () => document.getElementById('resetModal').classList.add('show');
+
+document.getElementById('confirmResetBtn').onclick = async () => {
+  const val = document.getElementById('resetConfirmInput').value.trim();
+  const status = document.getElementById('resetStatus');
+  if(val !== 'REINICIAR'){ status.textContent = 'Escribe exactamente REINICIAR para confirmar.'; return; }
+  const btn = document.getElementById('confirmResetBtn');
+  btn.disabled = true; btn.textContent = 'Borrando…'; status.textContent = '';
+  try{
+    const snap = await db.collection('statements').get();
+    const batch = db.batch();
+    snap.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    await db.collection('config').doc('meta').delete().catch(()=>{});
+    await db.collection('live').doc('prices').delete().catch(()=>{});
+    document.getElementById('resetConfirmInput').value = '';
+    closeModal('resetModal');
+  }catch(e){
+    status.textContent = 'Error al reiniciar: ' + e.message;
+  }
+  btn.disabled = false; btn.textContent = 'Borrar todo permanentemente';
+};
+
 document.getElementById('uploadBtn').onclick = () => document.getElementById('uploadModal').classList.add('show');
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
