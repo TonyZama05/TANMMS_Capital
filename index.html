@@ -83,7 +83,7 @@
   /* ===== Layout ===== */
   .wrap{max-width:1440px;margin:0 auto;padding:20px 22px 60px;}
   .kpis{
-    display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-bottom:18px;
+    display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:12px;margin-bottom:18px;
   }
   .kpi{
     background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
@@ -287,6 +287,7 @@
     <div class="kpi"><div class="label">Valor del portafolio</div><div class="value" id="kpiValue">—</div></div>
     <div class="kpi"><div class="label">Open PNL (no realizado)</div><div class="value" id="kpiPnl">—</div></div>
     <div class="kpi"><div class="label">Closed PNL (realizado)</div><div class="value" id="kpiClosedPnl">—</div></div>
+    <div class="kpi"><div class="label">Total PNL</div><div class="value" id="kpiTotalPnl">—</div></div>
     <div class="kpi"><div class="label">P&L del mes</div><div class="value" id="kpiMonth">—</div></div>
     <div class="kpi"><div class="label">Posiciones</div><div class="value" id="kpiPositions">—</div></div>
     <div class="kpi"><div class="label">Efectivo</div><div class="value" id="kpiCash">—</div></div>
@@ -559,7 +560,9 @@ function render(){
 
   document.getElementById('kpiValue').textContent = fmt$(totalMV);
   document.getElementById('kpiPnl').innerHTML = `<span class="${cls(pnlTotal)}">${fmt$(pnlTotal)}</span>`;
-  document.getElementById('kpiClosedPnl').innerHTML = `<span class="${cls(computeClosedPnl())}">${fmt$(computeClosedPnl())}</span>`;
+  const closedPnl = computeClosedPnl();
+  document.getElementById('kpiClosedPnl').innerHTML = `<span class="${cls(closedPnl)}">${fmt$(closedPnl)}</span>`;
+  document.getElementById('kpiTotalPnl').innerHTML = `<span class="${cls(pnlTotal + closedPnl)}">${fmt$(pnlTotal + closedPnl)}</span>`;
   document.getElementById('kpiPositions').textContent = holdings.length;
   document.getElementById('kpiCash').textContent = fmt$(latest.cash||0);
 
@@ -1036,36 +1039,65 @@ document.getElementById('saveStatementBtn').onclick = async () => {
    ========================================================= */
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
+// Yahoo expects BRK-B not BRK.B, and doesn't know GBM/DriveWealth-only tickers
+// (e.g. fund-internal codes) — those will legitimately fail and fall back to
+// the last statement price, which is fine.
+function toYahooSymbol(sym){ return sym.replace(/\./g, '-'); }
+
+async function fetchWithRetry(url, attempts = 2){
+  for(let i = 0; i < attempts; i++){
+    try{
+      const res = await fetch(url);
+      if(res.ok) return await res.json();
+    }catch(e){ /* try again */ }
+    await new Promise(r => setTimeout(r, 400 + i * 400));
+  }
+  return null;
+}
+
+// runs async tasks with limited concurrency so we don't flood the free CORS proxy
+async function runLimited(items, limit, worker){
+  const results = [];
+  let i = 0;
+  async function next(){
+    while(i < items.length){
+      const idx = i++;
+      results[idx] = await worker(items[idx]);
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, next));
+  return results;
+}
+
 async function fetchYahooPrices(symbols){
   const out = {};
-  await Promise.all(symbols.map(async sym=>{
-    try{
-      const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
-      const res = await fetch(CORS_PROXY + encodeURIComponent(yUrl));
-      const json = await res.json();
-      const meta = json?.chart?.result?.[0]?.meta;
-      if(meta && meta.regularMarketPrice != null){
-        const price = meta.regularMarketPrice;
-        const prevClose = meta.previousClose ?? meta.chartPreviousClose;
-        const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : null;
-        out[sym] = { price, changePct };
-      }
-    }catch(e){ /* símbolo no disponible en Yahoo, se omite */ }
-  }));
-  return out;
+  const failed = [];
+  await runLimited(symbols, 5, async (sym) => {
+    const ySym = toYahooSymbol(sym);
+    const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ySym)}?interval=1d&range=1d`;
+    const json = await fetchWithRetry(CORS_PROXY + encodeURIComponent(yUrl));
+    const meta = json?.chart?.result?.[0]?.meta;
+    if(meta && meta.regularMarketPrice != null){
+      const price = meta.regularMarketPrice;
+      const prevClose = meta.previousClose ?? meta.chartPreviousClose;
+      const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : null;
+      out[sym] = { price, changePct };
+    } else {
+      failed.push(sym);
+    }
+  });
+  return { out, failed };
 }
 
 async function fetchYahooClassification(symbols){
   const out = {};
-  await Promise.all(symbols.map(async sym=>{
-    try{
-      const yUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(sym)}?modules=assetProfile`;
-      const res = await fetch(CORS_PROXY + encodeURIComponent(yUrl));
-      const json = await res.json();
-      const profile = json?.quoteSummary?.result?.[0]?.assetProfile;
-      if(profile) out[sym] = { sector: profile.sector || null, industry: profile.industry || null };
-    }catch(e){ /* símbolo no disponible en Yahoo, se omite */ }
-  }));
+  await runLimited(symbols, 5, async (sym) => {
+    const ySym = toYahooSymbol(sym);
+    const yUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ySym)}?modules=assetProfile`;
+    const json = await fetchWithRetry(CORS_PROXY + encodeURIComponent(yUrl));
+    const profile = json?.quoteSummary?.result?.[0]?.assetProfile;
+    if(profile) out[sym] = { sector: profile.sector || null, industry: profile.industry || null };
+  });
   return out;
 }
 
@@ -1073,12 +1105,15 @@ async function refreshLivePrices(){
   if(!latest || !(latest.holdings||[]).length) return;
   const symbols = latest.holdings.map(h=>h.symbol);
   try{
-    let data;
+    let data, failedCount = 0;
     if(REFINITIV_PROXY_URL){
       const res = await fetch(`${REFINITIV_PROXY_URL}?symbols=${symbols.join(',')}`);
       data = await res.json();
     } else {
-      data = await fetchYahooPrices(symbols);
+      const result = await fetchYahooPrices(symbols);
+      data = result.out;
+      failedCount = result.failed.length;
+      if(failedCount) console.warn('No se pudo actualizar el precio de:', result.failed.join(', '), '— se muestra el último precio del estado de cuenta.');
     }
     // accepts either { SYM: price } or { SYM: { price, changePct } }
     livePrices = {}; liveChangePct = {};
@@ -1087,7 +1122,11 @@ async function refreshLivePrices(){
       if(v && typeof v === 'object'){ livePrices[sym] = v.price; liveChangePct[sym] = v.changePct; }
       else { livePrices[sym] = v; }
     });
-    document.getElementById('livePill').textContent = REFINITIV_PROXY_URL ? '● en vivo (Refinitiv)' : '● en vivo (Yahoo)';
+    const okCount = Object.keys(data).length;
+    const sourceLabel = REFINITIV_PROXY_URL ? 'Refinitiv' : 'Yahoo';
+    document.getElementById('livePill').textContent = failedCount
+      ? `● en vivo (${sourceLabel}) — ${okCount}/${symbols.length}`
+      : `● en vivo (${sourceLabel})`;
     render();
   }catch(e){ console.warn('No se pudieron actualizar precios en vivo:', e); }
 }
