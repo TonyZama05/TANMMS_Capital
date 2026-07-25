@@ -143,7 +143,7 @@ textarea:focus{outline:none;border-color:var(--acc)}
       <button class="ni" data-p="ordenes" onclick="go('ordenes')">Órdenes</button>
       <button class="ni" data-p="posiciones" onclick="go('posiciones')">Posiciones</button>
       <div class="nav-s">Análisis</div>
-      <button class="ni" data-p="rendimiento" onclick="go('rendimiento')">Rendimiento</button>
+      <button class="ni" data-p="rendimiento" onclick="go('rendimiento')">Performance</button>
       <button class="ni" data-p="diversificacion" onclick="go('diversificacion')">Diversificación</button>
       <button class="ni" data-p="riesgo" onclick="go('riesgo')">Riesgo</button>
       <div class="nav-s">Gestión</div>
@@ -204,6 +204,8 @@ var CFG_KEY='cpt_dash_cfg', DIV_KEY='cpt_dash_div';
 var divisaVista=localStorage.getItem(DIV_KEY)||'MXN', PAGE='resumen', PERIODO='3M', BENCH={sym:'^GSPC',label:'S&P 500'};
 var sortAb={k:'valor',d:-1}, sortCe={k:'realizado',d:-1}, sortOr={k:'fecha',d:-1};
 var CHARTS={};
+var COLS=JSON.parse(localStorage.getItem('cpt_cols')||'null')||{pctPort:true,sector:false};
+var RANGO={desde:'',hasta:''};
 
 window.addEventListener('load',function(){
   document.getElementById('oFecha').value=new Date().toISOString().slice(0,10);
@@ -343,6 +345,10 @@ function serieValor(p,D){
 }
 function filtrarPeriodo(serie){
   if(!serie.length)return serie;
+  if(PERIODO==='PERS'){
+    var d=RANGO.desde||'0000-00-00',h=RANGO.hasta||'9999-99-99';
+    return serie.filter(function(x){return x.fecha>=d&&x.fecha<=h;});
+  }
   var hoy=serie[serie.length-1].fecha,ini;
   var f=new Date(hoy);
   if(PERIODO==='1D')return serie.slice(-2);
@@ -370,8 +376,8 @@ function render(){
   if(!p){body.innerHTML='<div class="gate-msg"><b>Aún no hay portafolios.</b><br>Usa <b>+ Nuevo</b> arriba para crear el primero (TANMMS, Portafolio de Vale, etc.).</div>';document.getElementById('footValor').textContent='—';return;}
   var C=calcular(p),D=divisaVista;
 
-  // valor total (pie de barra lateral)
-  var totVal=0,hayPend=false;
+  // valor total (pie de barra lateral) = mercado + efectivo
+  var totVal=efectivo(p,D),hayPend=false;
   C.abiertas.forEach(function(a){if(a.valor!=null){var v=conv(a.valor,a.divisa,D);if(v!=null)totVal+=v;else hayPend=true;}else hayPend=true;});
   document.getElementById('footValor').textContent=money(totVal,D)+(hayPend?' •':'');
 
@@ -397,27 +403,57 @@ function totales(C,D){
   C.cerradas.forEach(function(c){var r=conv(c.realizado,c.divisa,D);if(r!=null)re+=r;});
   return {vm:vm,co:co,re:re,nr:vm-co,pct:co>0?(vm-co)/co*100:0,pend:pend};
 }
+function efectivo(p,D){
+  if(!(p.flujos&&p.flujos.length))return 0;   // sin depósitos registrados no rastreamos efectivo
+  var cash=0;
+  (p.flujos||[]).forEach(function(f){var m=conv(f.monto,f.divisa||'USD',D);if(m==null)return;if(f.tipo==='retiro')cash-=m;else cash+=m;});
+  (p.ordenes||[]).forEach(function(o){var m=conv(o.cantidad*o.precio,o.divisa,D);if(m==null)return;var com=conv(o.comision||0,o.divisa,D)||0;if(o.tipo==='compra')cash-=(m+com);else cash+=(m-com);});
+  return cash;
+}
+function xirr(fl){
+  if(fl.length<2)return null;
+  var t0=fl[0].fecha.getTime();
+  function npv(r){var s=0;for(var i=0;i<fl.length;i++){var yr=(fl[i].fecha.getTime()-t0)/31557600000;s+=fl[i].monto/Math.pow(1+r,yr);}return s;}
+  var lo=-0.999999,hi=100,flo=npv(lo),fhi=npv(hi);
+  if(!isFinite(flo)||!isFinite(fhi)||flo*fhi>0)return null;
+  var r=0;
+  for(var i=0;i<200;i++){r=(lo+hi)/2;var f=npv(r);if(Math.abs(f)<1e-7)break;if(flo*f<0){hi=r;}else{lo=r;flo=f;}}
+  return r;
+}
+function irr(p,D){
+  var fl=[];
+  (p.flujos||[]).forEach(function(f){var m=conv(f.monto,f.divisa||'USD',D);if(m==null)return;var signo=(f.tipo==='retiro')?1:-1;fl.push({fecha:new Date(f.fecha),monto:signo*m});});
+  if(!fl.length)return null;
+  var C=calcular(p),T=totales(C,D),cash=efectivo(p,D);
+  fl.push({fecha:new Date(),monto:T.vm+cash});
+  fl.sort(function(a,b){return a.fecha-b.fecha;});
+  var r=xirr(fl);
+  return r!=null?r*100:null;
+}
 
-function pgResumen(C,D,totVal,pend){
-  var T=totales(C,D);
+function pgResumen(C,D){
+  var p=EST.portafolios[EST.activo],T=totales(C,D),cash=efectivo(p,D),total=T.vm+cash,tir=irr(p,D);
   var html=head('Resumen','Vista general del portafolio activo en '+D+'.');
   html+='<div class="kpis">'+
-    kpi('Valor de mercado',money(T.vm,D)+(T.pend?' <span class="pend">•</span>':''))+
+    kpi('Valor total',money(total,D)+(T.pend?' <span class="pend">•</span>':''))+
+    kpi('Efectivo',money(cash,D))+
     kpi('Costo invertido',money(T.co,D))+
     kpi('P&L no realizado',money(T.nr,D),pctTxt(T.pct),T.nr>=0)+
-    kpi('P&L realizado',money(T.re,D),null,T.re>=0)+'</div>';
-  html+=movers();
+    kpi('P&L realizado',money(T.re,D),null,T.re>=0)+
+    kpi('P&L total',money(T.nr+T.re,D),null,(T.nr+T.re)>=0)+
+    kpi('IRR anual',tir!=null?pctTxt(tir):'—',tir!=null?'money-weighted':'requiere depósitos',tir!=null?(tir>=0):undefined)+'</div>';
+  html+=movers(C);
   html+='<div class="grid2">'+
     '<div class="card"><div class="card-h">Distribución por activo</div><div class="chart-box"><canvas id="cRes1"></canvas></div></div>'+
     '<div class="card"><div class="card-h">Distribución por divisa</div><div class="chart-box"><canvas id="cRes2"></canvas></div></div></div>';
-  html+='<div class="card"><div class="card-h">Posiciones abiertas</div><table id="tAb"></table></div>';
+  html+='<div class="card"><div class="card-h">Posiciones abiertas <span class="spacer"></span>'+colDropdown()+'</div><table id="tAb"></table></div>';
   document.getElementById('pageBody').innerHTML=html;
   chartsDiv(C,D,'cRes1','cRes2','activo','divisa');
-  renderAbiertas(C.abiertas,D);
+  renderAbiertas(C.abiertas,D,total,cash);
 }
 function nombreTicker(t){var m=META[t];return (m&&m.nombre)?m.nombre:t;}
 function moversPanel(titulo,arr){
-  if(!arr.length)return '<div class="card"><div class="card-h">'+titulo+'</div><div class="empty">Sin datos de precios aún.</div></div>';
+  if(!arr.length)return '<div class="card"><div class="card-h">'+titulo+'</div><div class="empty">Sin posiciones con precio en este portafolio.</div></div>';
   var rows=arr.map(function(x){
     var cls=x.cambioPct>=0?'pos':'neg',sig=x.cambioPct>=0?'▲':'▼',d=x.precio-x.prev;
     return '<div class="mv"><div><div class="mv-t">'+x.ticker+'</div><div class="mv-n">'+esc(nombreTicker(x.ticker))+'</div></div>'+
@@ -426,14 +462,23 @@ function moversPanel(titulo,arr){
   }).join('');
   return '<div class="card"><div class="card-h">'+titulo+'</div><div>'+rows+'</div></div>';
 }
-function movers(){
+function movers(C){
   var arr=[],P=PRECIOS.precios||{};
-  for(var t in P){if(P[t]&&isFinite(P[t].cambioPct))arr.push({ticker:t,precio:P[t].precio,prev:P[t].prev,cambioPct:P[t].cambioPct,moneda:P[t].moneda});}
+  (C.abiertas||[]).forEach(function(a){var q=P[a.ticker];if(q&&isFinite(q.cambioPct))arr.push({ticker:a.ticker,precio:q.precio,prev:q.prev,cambioPct:q.cambioPct,moneda:q.moneda});});
   if(!arr.length)return '';
   var gan=arr.slice().sort(function(a,b){return b.cambioPct-a.cambioPct;}).slice(0,5);
   var per=arr.slice().sort(function(a,b){return a.cambioPct-b.cambioPct;}).slice(0,5);
   return '<div class="grid2">'+moversPanel('Mayores alzas del día',gan)+moversPanel('Mayores bajas del día',per)+'</div>';
 }
+function colDropdown(){
+  return '<div style="position:relative;display:inline-block">'+
+    '<button class="btn btn-sm" onclick="toggleColMenu(event)">Columnas ▾</button>'+
+    '<div id="colMenu" class="hidden" style="position:absolute;right:0;top:34px;background:var(--card2);border:1px solid var(--line2);border-radius:8px;padding:6px;z-index:30;min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,.45)">'+
+    colChk('pctPort','% del portafolio')+colChk('sector','Sector')+'</div></div>';
+}
+function colChk(k,label){return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12px;cursor:pointer;color:var(--txt2)"><input type="checkbox" '+(COLS[k]?'checked':'')+' onchange="toggleCol(\''+k+'\')"> '+label+'</label>';}
+function toggleColMenu(e){if(e)e.stopPropagation();var m=document.getElementById('colMenu');if(m)m.classList.toggle('hidden');}
+function toggleCol(k){COLS[k]=!COLS[k];localStorage.setItem('cpt_cols',JSON.stringify(COLS));render();}
 
 function pgOrdenes(C){
   var html=head('Órdenes','Todas las compras y ventas del portafolio. Haz clic en los encabezados para ordenar.');
@@ -443,39 +488,44 @@ function pgOrdenes(C){
 }
 
 function pgPosiciones(C,D){
+  var p=EST.portafolios[EST.activo],T=totales(C,D),cash=efectivo(p,D),total=T.vm+cash;
   var html=head('Posiciones','Posiciones abiertas y cerradas, valuadas en '+D+'.');
-  html+='<div class="card"><div class="card-h">Abiertas</div><table id="tAb"></table></div>';
+  html+='<div class="card"><div class="card-h">Abiertas <span class="spacer"></span>'+colDropdown()+'</div><table id="tAb"></table></div>';
   html+='<div class="card"><div class="card-h">Cerradas</div><table id="tCe"></table></div>';
   document.getElementById('pageBody').innerHTML=html;
-  renderAbiertas(C.abiertas,D);renderCerradas(C.cerradas,D);
+  renderAbiertas(C.abiertas,D,total,cash);renderCerradas(C.cerradas,D);
 }
 
 function pgRendimiento(p,D){
-  var serie=serieValor(p,D);
-  var html=head('Rendimiento','Rendimiento del portafolio y comparación contra un benchmark.');
+  var serie=serieValor(p,D),tir=irr(p,D);
+  var html=head('Performance','Rendimiento del portafolio, IRR y comparación contra un benchmark.');
   if(serie.length<2){
-    html+='<div class="gate-msg"><b>Recopilando histórico…</b><br>Esta gráfica se construye con el cierre de cada día que guarda el recolector. Aparece con al menos <b>2 días</b> de datos. Ya está corriendo — solo necesita acumular días.</div>';
+    html+='<div class="kpis">'+kpi('IRR anual',tir!=null?pctTxt(tir):'—',tir!=null?'money-weighted':'requiere depósitos',tir!=null?(tir>=0):undefined)+'</div>';
+    html+='<div class="gate-msg"><b>Recopilando histórico…</b><br>La curva de valor se construye con el cierre de cada día que guarda el recolector. Aparece con al menos <b>2 días</b> de datos.</div>';
     document.getElementById('pageBody').innerHTML=html;return;
   }
   var per=filtrarPeriodo(serie),fechas=per.map(function(x){return x.fecha;});
-  var v0=per[0].valor,v1=per[per.length-1].valor,ch=v0>0?(v1/v0-1)*100:0;
-  // benchmark alineado, base 100 (% desde inicio del periodo)
+  var v0=per.length?per[0].valor:0,v1=per.length?per[per.length-1].valor:0,ch=v0>0?(v1/v0-1)*100:0;
   var bS=HIST.serie&&HIST.serie[BENCH.sym]?HIST.serie[BENCH.sym]:null,benchArr=null,benchPct=null,dif=null;
-  if(bS){var b0=cierre(bS,fechas[0]);if(b0){benchArr=fechas.map(function(f){var bv=cierre(bS,f);return bv!=null?(bv/b0-1)*100:null;});var bl=benchArr[benchArr.length-1];if(bl!=null){benchPct=bl;dif=ch-bl;}}}
-  html+='<div class="pill-row">'+['1D','5D','1M','3M','6M','YTD','1A','Máx'].map(function(x){return '<button class="pill '+(PERIODO===x?'active':'')+'" onclick="setPeriodo(\''+x+'\')">'+x+'</button>';}).join('')+
+  if(bS&&per.length){var b0=cierre(bS,fechas[0]);if(b0){benchArr=fechas.map(function(f){var bv=cierre(bS,f);return bv!=null?(bv/b0-1)*100:null;});var bl=benchArr[benchArr.length-1];if(bl!=null){benchPct=bl;dif=ch-bl;}}}
+  var pers=['1D','5D','1M','3M','6M','YTD','1A','Máx','PERS'],lbl={PERS:'Personalizado'};
+  html+='<div class="pill-row">'+pers.map(function(x){return '<button class="pill '+(PERIODO===x?'active':'')+'" onclick="setPeriodo(\''+x+'\')">'+(lbl[x]||x)+'</button>';}).join('')+
     '<span style="flex:1"></span><select class="sel" style="padding:6px 10px;font-size:12px" onchange="setBench(this.value)">'+
     [['^GSPC','S&P 500'],['^IXIC','NASDAQ'],['^MXX','IPC México']].map(function(b){return '<option value="'+b[0]+'|'+b[1]+'"'+(BENCH.sym===b[0]?' selected':'')+'>vs '+b[1]+'</option>';}).join('')+'</select></div>';
-  html+='<div class="kpis">'+kpi('Valor actual',money(v1,D))+kpi('Rendimiento ('+PERIODO+')',pctTxt(ch),null,ch>=0)+
+  if(PERIODO==='PERS')html+='<div class="pill-row" style="align-items:center"><span style="font-size:12px;color:var(--txt2)">Desde</span><input type="date" class="inp" style="padding:6px 10px" value="'+RANGO.desde+'" onchange="setRango(\'desde\',this.value)"><span style="font-size:12px;color:var(--txt2)">Hasta</span><input type="date" class="inp" style="padding:6px 10px" value="'+RANGO.hasta+'" onchange="setRango(\'hasta\',this.value)"></div>';
+  html+='<div class="kpis">'+kpi('Valor actual',money(v1,D))+kpi('Rendimiento del periodo',pctTxt(ch),null,ch>=0)+
     (benchPct!=null?kpi('vs '+BENCH.label,pctTxt(dif),(dif>=0?'le ganas':'vas abajo'),dif>=0):kpi('Δ valor',money(v1-v0,D),null,(v1-v0)>=0))+
-    kpi('Días de histórico',String(serie.length))+'</div>';
-  html+='<div class="card"><div class="card-h">'+(benchArr?'Rendimiento vs '+BENCH.label+' (base del periodo = 0%)':'Valor del portafolio')+'</div><div class="chart-box chart-tall"><canvas id="cRend"></canvas></div></div>';
-  if(!benchArr)html+='<div class="page-d" style="margin-top:-6px">El benchmark '+BENCH.label+' aparecerá cuando el recolector junte su histórico. Nota: el valor incluye aportaciones; el rendimiento ajustado por flujos llega con el módulo de flujos.</div>';
+    kpi('IRR anual',tir!=null?pctTxt(tir):'—',tir!=null?'money-weighted':'requiere depósitos',tir!=null?(tir>=0):undefined)+'</div>';
+  html+='<div class="card"><div class="card-h">'+(benchArr?'Rendimiento vs '+BENCH.label+' (inicio del periodo = 0%)':'Valor del portafolio')+'</div><div class="chart-box chart-tall"><canvas id="cRend"></canvas></div></div>';
+  html+='<div class="page-d" style="margin-top:-6px">IRR = retorno anualizado ponderado por flujos (usa tus depósitos importados). El rendimiento del periodo es sobre el valor de mercado.</div>';
   document.getElementById('pageBody').innerHTML=html;
+  if(!per.length)return;
   if(benchArr)lineChart('cRend',fechas,per.map(function(x){return v0>0?(x.valor/v0-1)*100:0;}),D,{pct:true,bench:benchArr,benchLabel:BENCH.label});
   else lineChart('cRend',fechas,per.map(function(x){return x.valor;}),D);
 }
 function setBench(v){var a=v.split('|');BENCH={sym:a[0],label:a[1]};render();}
 function setPeriodo(x){PERIODO=x;render();}
+function setRango(k,v){RANGO[k]=v;render();}
 
 function pgDiversificacion(C,D){
   var html=head('Diversificación','Composición del portafolio por distintos ejes, en '+D+'.');
@@ -696,14 +746,23 @@ function pgConfig(p){
 function reconectar(){if(_uE)_uE();if(_uP)_uP();if(_uH)_uH();if(_uM)_uM();if(_uD)_uD();localStorage.removeItem(CFG_KEY);document.getElementById('app').classList.add('hidden');document.getElementById('gate').classList.remove('hidden');}
 
 /* ═════════════ TABLAS ═════════════ */
-function renderAbiertas(rows,D){
+function renderAbiertas(rows,D,total,cash){
   var t=document.getElementById('tAb');if(!t)return;rows.sort(sorter(sortAb));
-  var head='<thead><tr>'+th('Ticker','ticker',sortAb,'ab')+th('Cant.','qty',sortAb,'ab')+th('Costo prom.','avg',sortAb,'ab')+th('Precio','precio',sortAb,'ab')+th('Valor ('+D+')','valor',sortAb,'ab')+th('P&L no real.','noReal',sortAb,'ab')+th('%','pct',sortAb,'ab')+'</tr></thead>';
-  if(!rows.length){t.innerHTML=head+'<tbody><tr><td class="empty" colspan="7">Sin posiciones abiertas.</td></tr></tbody>';return;}
-  t.innerHTML=head+'<tbody>'+rows.map(function(a){
+  var head='<thead><tr>'+th('Ticker','ticker',sortAb,'ab')+th('Cant.','qty',sortAb,'ab')+th('Costo prom.','avg',sortAb,'ab')+th('Precio','precio',sortAb,'ab')+th('Valor ('+D+')','valor',sortAb,'ab')+th('P&L no real.','noReal',sortAb,'ab')+th('%','pct',sortAb,'ab')+
+    (COLS.pctPort?'<th>% Portaf.</th>':'')+(COLS.sector?'<th>Sector</th>':'')+'</tr></thead>';
+  var ncols=7+(COLS.pctPort?1:0)+(COLS.sector?1:0);
+  var body=rows.map(function(a){
     var vD=a.valor!=null?conv(a.valor,a.divisa,D):null,nD=a.noReal!=null?conv(a.noReal,a.divisa,D):null;
-    return '<tr><td>'+a.ticker+' <span style="color:var(--txt3);font-weight:400;font-size:11px">'+a.divisa+'</span></td><td>'+fmt(a.qty)+'</td><td>'+fmt(a.avg)+'</td><td>'+(a.precio!=null?fmt(a.precio):'<span class="pend">pendiente</span>')+'</td><td>'+(vD!=null?money(vD,D):'—')+'</td>'+cell(nD,money(nD,D))+cell(a.pct,pctTxt(a.pct))+'</tr>';
-  }).join('')+'</tbody>';
+    var w=(vD!=null&&total>0)?vD/total*100:null,sec=(META[a.ticker]&&META[a.ticker].sector)||'—';
+    return '<tr><td>'+a.ticker+' <span style="color:var(--txt3);font-weight:400;font-size:11px">'+a.divisa+'</span></td><td>'+fmt(a.qty)+'</td><td>'+fmt(a.avg)+'</td><td>'+(a.precio!=null?fmt(a.precio):'<span class="pend">pendiente</span>')+'</td><td>'+(vD!=null?money(vD,D):'—')+'</td>'+cell(nD,money(nD,D))+cell(a.pct,pctTxt(a.pct))+
+      (COLS.pctPort?('<td>'+(w!=null?w.toFixed(1)+'%':'—')+'</td>'):'')+(COLS.sector?('<td style="font-family:var(--sans);font-size:12px">'+esc(sec)+'</td>'):'')+'</tr>';
+  }).join('');
+  if(cash!=null&&Math.abs(cash)>1e-9){
+    var wc=(total>0)?cash/total*100:null;
+    body+='<tr><td>Cash <span style="color:var(--txt3);font-weight:400;font-size:11px">'+D+'</span></td><td>—</td><td>—</td><td>—</td><td>'+money(cash,D)+'</td><td>—</td><td>—</td>'+(COLS.pctPort?('<td>'+(wc!=null?wc.toFixed(1)+'%':'—')+'</td>'):'')+(COLS.sector?'<td style="font-family:var(--sans);font-size:12px">Efectivo</td>':'')+'</tr>';
+  }
+  if(!body){t.innerHTML=head+'<tbody><tr><td class="empty" colspan="'+ncols+'">Sin posiciones abiertas.</td></tr></tbody>';return;}
+  t.innerHTML=head+'<tbody>'+body+'</tbody>';
 }
 function renderCerradas(rows,D){
   var t=document.getElementById('tCe');if(!t)return;rows.sort(sorter(sortCe));
